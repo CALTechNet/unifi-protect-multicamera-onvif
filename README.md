@@ -12,7 +12,7 @@ After you authenticate to an ONVIF device you get a lightweight web page that:
 - **1–2 streams** on a source → nothing to choose; Protect uses them as main + sub.
 - **More than 2 streams** → a **checkbox list** to choose which streams to add. The
   highest‑resolution checked stream becomes **High**, then **Medium**, then **Low**
-  (Protect uses up to three channels).
+  (Protect uses up to three channels, but exposes only 2 to the user).
 - Adds each selected camera. When a device exposes multiple video sources, each one you
   add becomes its own Protect device (kept distinct with a per‑source synthetic MAC).
 
