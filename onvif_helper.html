@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ONVIF Camera &amp; Stream Picker</title>
+<style>
+  :root{ color-scheme: dark; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+        background:#0b0e11; color:#e7ecf0; }
+  .wrap{ max-width:680px; margin:0 auto; padding:28px 20px 60px; }
+  h1{ font-size:20px; font-weight:600; margin:0 0 4px; }
+  .sub{ color:#8b97a4; font-size:13px; margin:0 0 22px; }
+  .card{ background:#151a1f; border:1px solid #232b33; border-radius:12px; padding:18px; margin-bottom:16px; }
+  label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#8b97a4; margin:12px 0 6px; }
+  input[type=text],input[type=password],select{
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid #2b343d;
+    background:#0e1318; color:#e7ecf0; font-size:14px; outline:none; }
+  input:focus,select:focus{ border-color:#3b82f6; }
+  .row{ display:flex; gap:12px; }
+  .row > div{ flex:1; }
+  button{ margin-top:18px; padding:11px 18px; border:0; border-radius:8px; background:#2563eb; color:#fff;
+           font-size:14px; font-weight:600; cursor:pointer; }
+  button:hover{ background:#1d4ed8; }
+  button:disabled{ opacity:.5; cursor:default; }
+  .hint{ font-size:13px; color:#9aa6b2; line-height:1.5; background:#0e1318; border:1px solid #232b33;
+         border-radius:8px; padding:10px 12px; }
+  ul.streams{ list-style:none; padding:0; margin:12px 0 0; }
+  ul.streams li{ padding:8px 10px; border:1px solid #232b33; border-radius:8px; margin-bottom:8px; font-size:14px; background:#0e1318; }
+  ul.streams li label{ display:flex; align-items:center; gap:10px; margin:0; text-transform:none; letter-spacing:0; font-size:14px; color:#e7ecf0; cursor:pointer; }
+  ul.streams input[type=checkbox]{ width:16px; height:16px; accent-color:#2563eb; }
+  #status{ margin-top:14px; font-size:13px; min-height:18px; white-space:pre-wrap; }
+  #status.ok{ color:#34d399; }
+  #status.err{ color:#f87171; }
+  b{ color:#cbd5e1; }
+  code{ background:#0e1318; padding:1px 5px; border-radius:4px; font-size:12px; color:#9aa6b2; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ONVIF Camera &amp; Stream Picker</h1>
+  <p class="sub">Authenticate to an ONVIF camera, then choose which video source and streams to add to UniFi Protect.</p>
+
+  <div class="card">
+    <label for="host">Camera host <span style="text-transform:none;color:#5d6b78">(IP or IP:port, e.g. 192.168.1.50 or 192.168.1.50:80)</span></label>
+    <input type="text" id="host" placeholder="192.168.1.50" autocomplete="off">
+    <div class="row">
+      <div>
+        <label for="user">Username</label>
+        <input type="text" id="user" autocomplete="off">
+      </div>
+      <div>
+        <label for="pass">Password</label>
+        <input type="password" id="pass" autocomplete="off">
+      </div>
+    </div>
+    <button id="probeBtn" onclick="doProbe()">Authenticate &amp; list streams</button>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none">
+    <div id="result"></div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<script>
+var BASE = location.pathname.replace(/\/onvif-helper$/, "");
+var probeData = null;
+var csrfToken = null;
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function setStatus(msg, isErr){ var s=$("status"); s.textContent=msg||""; s.className=isErr?"err":"ok"; }
+
+// UniFi OS requires an X-CSRF-Token header on POST/PUT/DELETE. GETs are exempt and
+// the response carries the current token in x-updated-csrf-token. Capture it from
+// every response so we always send the latest value.
+function captureCsrf(r){
+  try{
+    var t = r.headers.get("x-updated-csrf-token") || r.headers.get("x-csrf-token") || r.headers.get("x-expected-csrf-token");
+    if(t){ csrfToken = t; }
+  }catch(e){}
+}
+function seedCsrf(){
+  return fetch(BASE + "/onvif-helper", { method:"GET", credentials:"include" })
+    .then(captureCsrf).catch(function(){});
+}
+
+function postJson(path, body){
+  function mkOpts(){
+    var h = { "Content-Type":"application/json", "Accept":"application/json" };
+    if(csrfToken){ h["X-CSRF-Token"] = csrfToken; }
+    return { method:"POST", credentials:"include", headers:h, body: JSON.stringify(body) };
+  }
+  return fetch(BASE+path, mkOpts()).then(function(r){
+    captureCsrf(r);
+    // If the gateway rejected on CSRF, we now hold a fresh token — retry once.
+    if((r.status===403 || r.status===401) && csrfToken){
+      return fetch(BASE+path, mkOpts());
+    }
+    return r;
+  }).then(function(r){
+    captureCsrf(r);
+    return r.text().then(function(txt){
+      var j=null; try{ j=JSON.parse(txt); }catch(e){}
+      if(!r.ok){
+        var d = "";
+        if(j){ d = (typeof (j.error||j.message||j.name) === "string") ? (j.error||j.message||j.name) : JSON.stringify(j); }
+        else { d = (txt||"").slice(0,200); }
+        throw new Error("HTTP " + r.status + (d ? (" — " + d) : ""));
+      }
+      return j;
+    });
+  });
+}
+
+function doProbe(){
+  var host=$("host").value.trim(), u=$("user").value, p=$("pass").value;
+  if(!host){ $("resultCard").style.display="block"; setStatus("Enter a camera host.", true); return; }
+  $("resultCard").style.display="block";
+  $("result").innerHTML="";
+  setStatus("Authenticating and probing streams...", false);
+  $("probeBtn").disabled=true;
+  var pre = csrfToken ? Promise.resolve() : seedCsrf();
+  pre.then(function(){ return postJson("/probe", { host:host, username:u, password:p }); })
+    .then(function(d){
+      probeData=d;
+      renderProbe(d);
+      setStatus("Connected to " + esc(d.name||"camera") + ". Found " + d.cameras.length + " video source(s).", false);
+    })
+    .catch(function(e){ setStatus("Failed: " + (e && e.message ? e.message : e), true); })
+    .then(function(){ $("probeBtn").disabled=false; });
+}
+
+function renderProbe(d){
+  var html="";
+  if(d.cameras.length>1){
+    html += "<label>Camera (ONVIF video source)</label><select id=\"camSel\" onchange=\"renderCam()\">";
+    for(var i=0;i<d.cameras.length;i++){
+      html += "<option value=\"" + i + "\">" + esc(d.cameras[i].label) + " &mdash; " + d.cameras[i].streams.length + " stream(s)</option>";
+    }
+    html += "</select>";
+    html += "<p class=\"hint\" style=\"margin-top:10px\">This device exposes multiple cameras behind one address. Each one you add becomes its own device in Protect.</p>";
+  }
+  html += "<div id=\"camBody\"></div>";
+  html += "<button id=\"addBtn\" onclick=\"doAdopt()\">Add this camera</button>";
+  $("result").innerHTML=html;
+  renderCam();
+}
+
+function curCam(){ var sel=$("camSel"); var idx=sel?parseInt(sel.value,10):0; return probeData.cameras[idx]; }
+
+function streamLabel(st){
+  return esc(st.profileName||st.profileToken) + " &mdash; <b>" + st.width + "x" + st.height + "</b> " +
+         esc(st.encoding||"") + (st.fps? " @" + st.fps + "fps":"") + (st.hasAudio? " <code>audio</code>":"");
+}
+
+function renderCam(){
+  var cam=curCam(); var s=cam.streams; var html="";
+  if(s.length<=2){
+    html += "<p class=\"hint\">This source exposes " + s.length + " stream(s). UniFi will use them automatically as main + sub &mdash; no selection needed.</p>";
+    html += "<ul class=\"streams\">";
+    for(var i=0;i<s.length;i++){ html += "<li>" + streamLabel(s[i]) + "</li>"; }
+    html += "</ul>";
+  } else {
+    html += "<p class=\"hint\">" + s.length + " streams available &mdash; check which to add. The highest-resolution selected becomes <b>High</b>, then <b>Medium</b>, then <b>Low</b> (UniFi uses up to 3 channels).</p>";
+    html += "<ul class=\"streams\">";
+    for(var i=0;i<s.length;i++){
+      var ck = (i<3) ? " checked" : "";
+      html += "<li><label><input type=\"checkbox\" class=\"strm\" value=\"" + esc(s[i].profileToken) + "\"" + ck + "> " + streamLabel(s[i]) + "</label></li>";
+    }
+    html += "</ul>";
+  }
+  $("camBody").innerHTML=html;
+}
+
+function doAdopt(){
+  var cam=curCam(); var tokens=[];
+  var boxes=document.querySelectorAll(".strm");
+  if(boxes.length){
+    for(var i=0;i<boxes.length;i++){ if(boxes[i].checked) tokens.push(boxes[i].value); }
+    if(!tokens.length){ setStatus("Select at least one stream.", true); return; }
+  } else {
+    for(var i=0;i<cam.streams.length;i++){ tokens.push(cam.streams[i].profileToken); }
+  }
+  var body={
+    host: $("host").value.trim(),
+    username: $("user").value,
+    password: $("pass").value,
+    profileTokens: tokens
+  };
+  if(probeData.cameras.length>1 && cam.videoSourceToken){ body.macSalt = cam.videoSourceToken; }
+  setStatus("Adding camera to Protect...", false);
+  $("addBtn").disabled=true;
+  postJson("/adopt", body)
+    .then(function(c){
+      var nm = (c && (c.name || c.id)) || "camera";
+      setStatus("Added \"" + esc(nm) + "\". Open the Devices list in Protect to configure it.", false);
+    })
+    .catch(function(e){ setStatus("Adopt failed: " + (e && e.message ? e.message : e), true); })
+    .then(function(){ $("addBtn").disabled=false; });
+}
+
+// Seed a CSRF token up front so the first POST already has it.
+seedCsrf();
+</script>
+</body>
+</html>
