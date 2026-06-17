@@ -46,7 +46,7 @@ minified bundle — if Protect changed those functions, `apply.sh` will refuse t
 SSH into the console as root, then:
 
 ```bash
-git clone https://github.com/<you>/unifi-protect-multicam-onvif.git
+git clone https://github.com/CALTechNet/unifi-protect-multicam-onvif.git
 cd unifi-protect-multicam-onvif
 sudo ./apply.sh
 sudo systemctl restart unifi-protect
