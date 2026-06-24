@@ -162,3 +162,24 @@ with** so the session cookie applies.
 - Adopting via **Add stream URL** or a non‑first video source always uses a synthetic MAC,
   so it lands as a separate Protect device and never collides with the primary.
 - Not affiliated with or endorsed by Ubiquiti.
+
+---
+
+## Security & supported versions
+
+"Supported" here means the **UniFi Protect build** the patch is anchored to — this repo has no
+release tags; the latest tested state always lives on `main`.
+
+| UniFi Protect version | Status |
+|---|---|
+| **7.1.83** | ✅ Supported — developed and tested against this build |
+| Other 7.1.x | ⚠️ Best effort — patches only if the anchors still match, **aborts safely** otherwise |
+| ≤ 7.0.x and ≥ 7.2.0 | ❌ Untested — expect a safe abort |
+
+The mod only adds routes behind Protect's existing **authenticated** third‑party‑camera API on
+its own origin; it stores no credentials and sends nothing to third parties. The anchored patch
+can't half‑apply — `patch_onvif.py` requires each anchor exactly once and `apply.sh` syntax‑checks
+the result and keeps a timestamped backup before swapping anything in.
+
+Found a security issue? Please **don't** open a public issue — see [`SECURITY.md`](SECURITY.md)
+for private reporting and the full policy.
