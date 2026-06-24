@@ -166,6 +166,9 @@ function manualCardHtml(){
     "<input type=\"text\" id=\"mLq\" placeholder=\"rtsp://user:pass@192.168.1.50/stream7\" autocomplete=\"off\">" +
     "<label style=\"display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;cursor:pointer\">" +
     "<input type=\"checkbox\" id=\"mAudio\" style=\"width:16px;height:16px;accent-color:#2563eb\"> This stream carries audio</label>" +
+    "<label for=\"mSnap\">Snapshot image URL <span style=\"text-transform:none;color:#5d6b78\">(optional &mdash; gives the Dashboard a preview tile)</span></label>" +
+    "<input type=\"text\" id=\"mSnap\" placeholder=\"http://192.168.1.50/onvif/snapshot\" autocomplete=\"off\">" +
+    "<p class=\"hint\" style=\"margin-bottom:4px\">RTSP-only streams have no still image, so Protect shows a black Dashboard tile. If the camera exposes an HTTP JPEG snapshot, paste it here for a preview. Leave blank if it has none.</p>" +
     "<button id=\"addManualBtn\" onclick=\"doAdoptManual()\">Add stream URL as camera</button>" +
     "</div>";
 }
@@ -231,6 +234,7 @@ function doAdopt(){
 function doAdoptManual(){
   var hq=($("mHq").value||"").trim(), lq=($("mLq").value||"").trim(), nm=($("mName").value||"").trim();
   var aud=!!($("mAudio")&&$("mAudio").checked);
+  var snap=($("mSnap")&&$("mSnap").value||"").trim();
   if(!hq){ setStatus("Enter the high-quality RTSP URL for the stream.", true); return; }
   var streams=[{ uri:hq, quality:"high", name:(nm||"Stream")+" (high)", hasAudio:aud }];
   if(lq){ streams.push({ uri:lq, quality:"low", name:(nm||"Stream")+" (low)", hasAudio:aud }); }
@@ -243,6 +247,7 @@ function doAdoptManual(){
     // ONVIF cameras on the same rig.
     macSalt: "manual:" + (nm || hq)
   };
+  if(snap){ body.snapshotUrl = snap; }
   setStatus("Adding stream to Protect...", false);
   $("addManualBtn").disabled=true;
   postJson("/adopt", body)
