@@ -39,7 +39,8 @@ After you authenticate to an ONVIF device you get a lightweight web page that:
 
 It will likely work on nearby 7.1.x builds, but the patch matches exact code anchors in the
 minified bundle — if Protect changed those functions, `apply.sh` will refuse to patch
-(safe: it aborts instead of producing a broken file). See [How it works](#how-it-works).
+(safe: it aborts instead of producing a broken file). See [How it works](#how-it-works) and
+[`SECURITY.md`](SECURITY.md) for the supported‑version policy.
 
 > ⚠️ **This is an unofficial modification of Ubiquiti's bundled code.** A Protect upgrade
 > replaces `service.js` and removes the mod — just re‑run `apply.sh`. Keep the backups the
