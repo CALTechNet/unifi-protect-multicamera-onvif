@@ -144,6 +144,7 @@ with** so the session cookie applies.
 | `apply.sh` | backup → patch → syntax‑check → swap → install the page to the runtime path |
 | `patch_onvif.py` | the 11 anchored edits; reads `onvif_helper.html` from its own directory |
 | `onvif_helper.html` | the picker UI; installed to `/etc/unifi-protect/onvif-mod/` (read live) and embedded in `service.js` as a fallback |
+| `tools/onvif_diag.py` | diagnostics: dumps a **redacted** snapshot of third‑party camera records grouped by host (for multi‑lens bug reports) — `sudo python3 tools/onvif_diag.py` |
 
 ---
 
