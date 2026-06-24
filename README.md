@@ -93,7 +93,9 @@ download the repo as a zip. They must sit together in the same directory.
 5. **A lens/sensor not in the list?** Some cameras expose extra sensors only over direct
    RTSP, not ONVIF (e.g. a Tapo dual‑lens camera's telephoto lens at `…/stream6` and
    `…/stream7`). Use **Add stream URL as camera** at the bottom: paste the high‑quality
-   RTSP URL (and optionally a low‑quality one), and it's adopted as its own device.
+   RTSP URL (and optionally a low‑quality one), tick **carries audio** if it has an audio
+   track, optionally give a **Snapshot image URL** (for a Dashboard preview tile), and it's
+   adopted as its own device.
 
 The page only talks to Protect's own authenticated API on the same origin; it stores
 nothing and sends nothing anywhere else.
@@ -122,7 +124,7 @@ before replacing, and refuses to apply twice — so it either patches cleanly or
 | ONVIF profile parser (`fetchProfiles`) | carry the ONVIF `videoSourceToken` for each profile (Protect dropped it), so streams can be grouped by physical camera |
 | Probe (`getCameraDetails`) | include `profileName` + `videoSourceToken` on every probed stream, and capture a **per‑profile snapshot URI** so each video source gets its own thumbnail |
 | New `probe` action | authenticate and return streams grouped by video source **without** adopting (`POST /third-party-cameras/probe`) |
-| Adopt subscriber | accept optional `profileTokens` (ordered selection) → build channels from exactly those; optional `manualStreams` build channels from caller‑supplied RTSP URLs (non‑ONVIF sensors); use the chosen source's snapshot as the thumbnail; optional `macSalt` keeps multiple sources distinct |
+| Adopt subscriber | accept optional `profileTokens` (ordered selection) → build channels from exactly those; optional `manualStreams` build channels from caller‑supplied RTSP URLs (non‑ONVIF sensors, PTZ off, audio + fps/bitrate from the request); use the chosen source's snapshot, or a caller‑supplied `snapshotUrl`, as the thumbnail; optional `macSalt` keeps multiple sources distinct |
 | Router | extend the request schema with `profileTokens` + `macSalt` + `manualStreams`; add the `probe` route and serve the picker page at `GET /third-party-cameras/onvif-helper` |
 | ONVIF re‑sync (`syncOnvifCameraConfig` / `updateOnvifCameraInfo`) | **skip** cameras tagged as manual (`profileToken` of `manual-*`) so Protect's periodic ONVIF re‑probe doesn't overwrite a hand‑entered stream URL back to the camera's ONVIF profiles |
 
@@ -171,6 +173,12 @@ with** so the session cookie applies.
   binding — leaving it on made the iOS app crash trying to drive it) and at a sane default
   frame rate / bitrate. Tick **This stream carries audio** in the picker if your RTSP URL
   includes an audio track, so Protect shows the audio controls; leave it off otherwise.
+- **Dashboard preview tile:** Protect builds the Dashboard still for a third‑party camera by
+  fetching an HTTP **snapshot URL** — it does *not* grab a frame from the RTSP stream. A
+  pure‑RTSP manual stream therefore has no preview (black tile) unless you give it a
+  **Snapshot image URL** in the picker (many cameras expose an HTTP JPEG endpoint). Cameras
+  with no snapshot endpoint can't get a preview without re‑encoding the live stream, which
+  would mean replacing Protect's own snapshot pipeline — out of scope for this surgical mod.
 - **Dashboard live view with two devices on one IP:** Protect's Dashboard grid binds a
   live tile per camera IP, so when two Protect devices share one camera IP (a multi‑lens
   rig, or a manual stream added next to the ONVIF lens) only the **first‑adopted** one
