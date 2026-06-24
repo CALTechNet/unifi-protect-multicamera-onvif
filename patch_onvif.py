@@ -22,18 +22,23 @@ edits.append((
  r'''e.AudioEncoderConfiguration?O(e.AudioEncoderConfiguration):void 0,videoSourceToken:e.VideoSourceConfiguration?.SourceToken??e.VideoSourceConfiguration?.["@_token"]}})''',
 ))
 
-# R3: getCameraDetails -> include profileName + videoSourceToken on each stream
+# R3: getCameraDetails -> include profileName + videoSourceToken on each stream,
+#     and capture a PER-PROFILE snapshot URI so each video source gets its own
+#     thumbnail instead of every camera reusing the device-level snapshot (issue #2).
 edits.append((
- "R3 getCameraDetails stream fields",
- r'''hasAudio:i,profileToken:t.token})''',
- r'''hasAudio:i,profileToken:t.token,profileName:t.name,videoSourceToken:t.videoSourceToken})''',
+ "R3 getCameraDetails stream fields + per-profile snapshot",
+ r'''const o=(0,a.replaceUrlHostname)(await(0,n.getStreamUri)(u,t.token),e);g.push({resolution:r.resolution,encoding:r.encoding,quality:r.quality,bitrate:r.rateControl.bitrateLimit,fps:r.rateControl.frameRateLimit,uri:o,hasAudio:i,profileToken:t.token})''',
+ r'''const o=(0,a.replaceUrlHostname)(await(0,n.getStreamUri)(u,t.token),e);let __snap;try{__snap=(0,a.replaceUrlHostname)(await(0,n.getSnapshotUri)(u,t.token),e)}catch(__e){__snap=void 0}g.push({resolution:r.resolution,encoding:r.encoding,quality:r.quality,bitrate:r.rateControl.bitrateLimit,fps:r.rateControl.frameRateLimit,uri:o,hasAudio:i,profileToken:t.token,profileName:t.name,videoSourceToken:t.videoSourceToken,snapshotUri:__snap})''',
 ))
 
-# R4: adopt subscriber -> honor selected profileTokens before building channels
+# R4: adopt subscriber -> (a) honor selected profileTokens before building channels;
+#     (b) optionally build channels from caller-supplied manual RTSP URLs for streams
+#         the camera doesn't expose over ONVIF, e.g. a Tapo telephoto lens (issue #3);
+#     (c) use the chosen source's per-profile snapshot URI as the thumbnail (issue #2).
 edits.append((
- "R4 adopt stream selection",
+ "R4 adopt stream selection + manual streams + per-source snapshot",
  r'''const{streams:E,hqStream:_,lqStream:T,encoding:A}=(0,p.getStreamData)(S),R=S.snapshotUri;''',
- r'''const __sel=Array.isArray(t.profileTokens)&&t.profileTokens.length>0?t.profileTokens:null,__Sx=__sel?{...S,streams:S.streams.filter(x=>__sel.includes(x.profileToken)).sort((a,b)=>__sel.indexOf(a.profileToken)-__sel.indexOf(b.profileToken))}:S,__Sf=__sel&&__Sx.streams.length>0?__Sx:S;const{streams:E,hqStream:_,lqStream:T,encoding:A}=(0,p.getStreamData)(__Sf),R=S.snapshotUri;''',
+ r'''const __man=Array.isArray(t.manualStreams)?t.manualStreams.filter(m=>m&&m.uri):[],__sel=Array.isArray(t.profileTokens)&&t.profileTokens.length>0?t.profileTokens:null,__Sx=__sel?{...S,streams:S.streams.filter(x=>__sel.includes(x.profileToken)).sort((a,b)=>__sel.indexOf(a.profileToken)-__sel.indexOf(b.profileToken))}:S,__Sf=__man.length>0?{...S,streams:__man.map((m,i)=>({resolution:{width:Number(m.width)||(0===i?1920:640),height:Number(m.height)||(0===i?1080:480)},encoding:m.encoding||"h264",quality:"",bitrate:0,fps:0,uri:m.uri,hasAudio:!1,profileToken:"manual-"+i,profileName:m.name||"Manual stream "+(i+1),videoSourceToken:t.macSalt||"manual",snapshotUri:void 0}))}:__sel&&__Sx.streams.length>0?__Sx:S;const{streams:E,hqStream:_,lqStream:T,encoding:A}=(0,p.getStreamData)(__Sf),R=_&&_.snapshotUri||S.snapshotUri;''',
 ))
 
 # R5: adopt subscriber -> optional per-source MAC salt so multiple cameras behind one endpoint stay distinct
@@ -57,25 +62,25 @@ edits.append((
  r'''t.probe=async(e,t)=>{const{username:c,password:g}=t;let v,y;if("camera"in t){const h=t.camera;v=h.host,y=h.thirdPartyCameraInfo.port}else{if(!("host"in t))throw new Error("Invalid probe parameters");[v,y="80"]=t.host.split(":")}n.default.ok(v,"Missing camera host"),n.default.ok(y,"Missing camera port");const S=await(0,l.getCameraDetails)(v,y.toString(),c,g,{});if(!S.success)throw new s.UnauthorizedError({details:S.errors});const G=new Map;for(const st of S.streams){const en=(st.encoding||"").toLowerCase();if(!en.includes("264")&&!en.includes("265"))continue;const k=st.videoSourceToken||"__default__";G.has(k)||G.set(k,[]),G.get(k).push({profileToken:st.profileToken,profileName:st.profileName||st.profileToken,encoding:st.encoding,width:st.resolution?st.resolution.width:0,height:st.resolution?st.resolution.height:0,fps:st.fps,bitrate:st.bitrate,hasAudio:!!st.hasAudio})}const cams=Array.from(G.entries()).map(([k,arr],idx)=>(arr.sort((a,b)=>b.width-a.width),{videoSourceToken:"__default__"===k?null:k,label:"__default__"===k?S.name||"Camera "+(idx+1):(S.name||"Camera")+" #"+(idx+1),streams:arr}));return{name:S.name,ptz:!!S.ptz,success:!0,errors:S.errors,host:v,port:String(y),cameras:cams}};t.adopt=async(e,t)=>{var r;const{store:o}=e,{username:c,password:g}=t;try{let h,v,y;''',
 ))
 
-# R8: extend adopt/probe request schema to allow profileTokens + macSalt
+# R8: extend adopt/probe request schema to allow profileTokens + macSalt + manualStreams
 edits.append((
- "R8 router schema profileTokens/macSalt",
+ "R8 router schema profileTokens/macSalt/manualStreams",
  r'''.and(i.z.object({username:i.z.string(),password:i.z.string()}))''',
- r'''.and(i.z.object({username:i.z.string(),password:i.z.string(),profileTokens:i.z.array(i.z.string()).optional(),macSalt:i.z.string().optional()}))''',
+ r'''.and(i.z.object({username:i.z.string(),password:i.z.string(),profileTokens:i.z.array(i.z.string()).optional(),macSalt:i.z.string().optional(),manualStreams:i.z.array(i.z.object({uri:i.z.string(),quality:i.z.string().optional(),name:i.z.string().optional(),encoding:i.z.string().optional(),width:i.z.number().optional(),height:i.z.number().optional()})).optional()}))''',
 ))
 
 # R9: thread selection through adopt route (camera branch)
 edits.append((
  "R9 router adopt n camera branch",
  r'''n={camera:t,username:i,password:a,user:e.user}''',
- r'''n={camera:t,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt}''',
+ r'''n={camera:t,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,manualStreams:e.body.manualStreams}''',
 ))
 
 # R10: thread selection through adopt route (host branch)
 edits.append((
  "R10 router adopt n host branch",
  r'''else n={host:o,username:i,password:a,user:e.user}''',
- r'''else n={host:o,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt}''',
+ r'''else n={host:o,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,manualStreams:e.body.manualStreams}''',
 ))
 
 # ---- R11: add /probe route, the helper HTML, and the /onvif-helper GET route ----

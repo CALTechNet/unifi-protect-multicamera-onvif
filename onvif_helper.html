@@ -145,11 +145,31 @@ function renderProbe(d){
   }
   html += "<div id=\"camBody\"></div>";
   html += "<button id=\"addBtn\" onclick=\"doAdopt()\">Add this camera</button>";
+  html += manualCardHtml();
   $("result").innerHTML=html;
   renderCam();
 }
 
-function curCam(){ var sel=$("camSel"); var idx=sel?parseInt(sel.value,10):0; return probeData.cameras[idx]; }
+// Some cameras expose extra sensors only over direct RTSP, not ONVIF — e.g. the
+// telephoto lens on TP-Link Tapo dual-lens models (stream6/stream7). This lets you
+// add such a stream as its own Protect device. (issue #3)
+function manualCardHtml(){
+  return "<div class=\"card\" style=\"margin-top:18px;background:#10161c\">" +
+    "<label style=\"margin-top:0\">Stream not listed? Add one by URL</label>" +
+    "<p class=\"hint\" style=\"margin-bottom:4px\">For a lens/sensor exposed only via RTSP (e.g. a Tapo telephoto lens at " +
+    "<code>rtsp://&hellip;/stream6</code>). It becomes a separate Protect device.</p>" +
+    "<label for=\"mName\">Name <span style=\"text-transform:none;color:#5d6b78\">(optional)</span></label>" +
+    "<input type=\"text\" id=\"mName\" placeholder=\"Telephoto lens\" autocomplete=\"off\">" +
+    "<label for=\"mHq\">High-quality RTSP URL</label>" +
+    "<input type=\"text\" id=\"mHq\" placeholder=\"rtsp://user:pass@192.168.1.50/stream6\" autocomplete=\"off\">" +
+    "<label for=\"mLq\">Low-quality RTSP URL <span style=\"text-transform:none;color:#5d6b78\">(optional)</span></label>" +
+    "<input type=\"text\" id=\"mLq\" placeholder=\"rtsp://user:pass@192.168.1.50/stream7\" autocomplete=\"off\">" +
+    "<button id=\"addManualBtn\" onclick=\"doAdoptManual()\">Add stream URL as camera</button>" +
+    "</div>";
+}
+
+function curCamIdx(){ var sel=$("camSel"); return sel?parseInt(sel.value,10):0; }
+function curCam(){ return probeData.cameras[curCamIdx()]; }
 
 function streamLabel(st){
   return esc(st.profileName||st.profileToken) + " &mdash; <b>" + st.width + "x" + st.height + "</b> " +
@@ -190,7 +210,10 @@ function doAdopt(){
     password: $("pass").value,
     profileTokens: tokens
   };
-  if(probeData.cameras.length>1 && cam.videoSourceToken){ body.macSalt = cam.videoSourceToken; }
+  // Leave the FIRST/only source on the device's real MAC so Protect's own ONVIF
+  // discovery sees the rig as adopted and stops offering it. Salt only the extra
+  // sources so they land as separate Protect devices. (issue #1)
+  if(curCamIdx()>0 && cam.videoSourceToken){ body.macSalt = cam.videoSourceToken; }
   setStatus("Adding camera to Protect...", false);
   $("addBtn").disabled=true;
   postJson("/adopt", body)
@@ -200,6 +223,31 @@ function doAdopt(){
     })
     .catch(function(e){ setStatus("Adopt failed: " + (e && e.message ? e.message : e), true); })
     .then(function(){ $("addBtn").disabled=false; });
+}
+
+function doAdoptManual(){
+  var hq=($("mHq").value||"").trim(), lq=($("mLq").value||"").trim(), nm=($("mName").value||"").trim();
+  if(!hq){ setStatus("Enter the high-quality RTSP URL for the stream.", true); return; }
+  var streams=[{ uri:hq, quality:"high", name:(nm||"Stream")+" (high)" }];
+  if(lq){ streams.push({ uri:lq, quality:"low", name:(nm||"Stream")+" (low)" }); }
+  var body={
+    host: $("host").value.trim(),
+    username: $("user").value,
+    password: $("pass").value,
+    manualStreams: streams,
+    // Always salt so the manual stream becomes its own device, distinct from the
+    // ONVIF cameras on the same rig.
+    macSalt: "manual:" + (nm || hq)
+  };
+  setStatus("Adding stream to Protect...", false);
+  $("addManualBtn").disabled=true;
+  postJson("/adopt", body)
+    .then(function(c){
+      var n2 = (c && (c.name || c.id)) || "camera";
+      setStatus("Added \"" + esc(n2) + "\" from URL. Open the Devices list in Protect to configure it.", false);
+    })
+    .catch(function(e){ setStatus("Adopt failed: " + (e && e.message ? e.message : e), true); })
+    .then(function(){ $("addManualBtn").disabled=false; });
 }
 
 // Seed a CSRF token up front so the first POST already has it.
