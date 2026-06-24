@@ -9,10 +9,11 @@ After you authenticate to an ONVIF device you get a lightweight web page that:
 - Lists every usable (H.264/H.265) media profile the camera exposes.
 - Groups profiles by **video source**, so multi‑sensor / NVR‑style devices that present
   several physical cameras behind one IP show a **dropdown** to pick which camera.
-- **1–2 streams** on a source → nothing to choose; Protect uses them as main + sub.
-- **More than 2 streams** → a **checkbox list** to choose which streams to add. The
-  highest‑resolution checked stream becomes **High**, then **Medium**, then **Low**
-  (Protect uses up to three channels, but exposes only 2 to the user).
+- **1–2 streams** on a source → nothing to choose; Protect uses them as its two profiles,
+  **High** + **Low**.
+- **More than 2 streams** → a **checkbox list** to choose which streams to add. Of the
+  streams you check, the highest‑resolution becomes **High** and the lowest becomes **Low**
+  — Protect uses just **two** profiles (High and Low) for these cameras.
 - Adds each selected camera. When a device exposes multiple video sources, each one you
   add becomes its own Protect device. The **first** source keeps the rig's real MAC so
   Protect's own discovery stops offering it once adopted; the extra sources get a
@@ -148,8 +149,9 @@ with** so the session cookie applies.
 
 ## Notes & limitations
 
-- Protect's channel model is fixed at three (High/Medium/Low); a single source contributes
-  at most three streams. Checking more than three just uses the top three by resolution.
+- Protect uses **two** profiles for these cameras — **High** and **Low**. Of the streams you
+  check, the highest‑resolution becomes High and the lowest becomes Low; any in between are
+  ignored.
 - Selected streams should share one codec — Protect collapses a camera to a single codec.
 - Multi‑source ("multiple cameras behind one IP") support relies on the device reporting a
   distinct ONVIF `VideoSourceConfiguration` token per sensor. Devices that don't will show

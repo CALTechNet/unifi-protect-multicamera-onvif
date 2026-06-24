@@ -179,15 +179,16 @@ function streamLabel(st){
 function renderCam(){
   var cam=curCam(); var s=cam.streams; var html="";
   if(s.length<=2){
-    html += "<p class=\"hint\">This source exposes " + s.length + " stream(s). UniFi will use them automatically as main + sub &mdash; no selection needed.</p>";
+    html += "<p class=\"hint\">This source exposes " + s.length + " stream(s). UniFi will use them automatically as its two profiles, <b>High</b> + <b>Low</b> &mdash; no selection needed.</p>";
     html += "<ul class=\"streams\">";
     for(var i=0;i<s.length;i++){ html += "<li>" + streamLabel(s[i]) + "</li>"; }
     html += "</ul>";
   } else {
-    html += "<p class=\"hint\">" + s.length + " streams available &mdash; check which to add. The highest-resolution selected becomes <b>High</b>, then <b>Medium</b>, then <b>Low</b> (UniFi uses up to 3 channels).</p>";
+    html += "<p class=\"hint\">" + s.length + " streams available &mdash; check which to add. Of the checked streams the highest resolution becomes <b>High</b> and the lowest becomes <b>Low</b> &mdash; UniFi uses just two profiles (High and Low).</p>";
     html += "<ul class=\"streams\">";
     for(var i=0;i<s.length;i++){
-      var ck = (i<3) ? " checked" : "";
+      // Default to the top two by resolution — Protect only uses High + Low.
+      var ck = (i<2) ? " checked" : "";
       html += "<li><label><input type=\"checkbox\" class=\"strm\" value=\"" + esc(s[i].profileToken) + "\"" + ck + "> " + streamLabel(s[i]) + "</label></li>";
     }
     html += "</ul>";
