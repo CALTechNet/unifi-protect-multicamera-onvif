@@ -12,8 +12,10 @@ report: the records share `host` while differing in `mac`/`id`, so the per-group
 `shared` vs `differs` breakdown points straight at the field the live grid
 collides on.
 
-What is removed: passwords, auth tokens, key material, fingerprints, and any
-user:pass@ / credential query params embedded in RTSP/snapshot URLs.
+Redaction policy (matches the mod's own debug logging): IPs, ports, camera models,
+and camera names are KEPT (they aid diagnosis); usernames and passwords are NOT.
+What is removed: usernames, passwords, auth tokens, key material, fingerprints, and
+any user:pass@ / credential query params embedded in RTSP/snapshot URLs.
 What is kept (needed to diagnose): host, mac, id, name, channels, codec,
 parentCameraGroupId, connectionHost, guid, streamSharing, and the (de-credentialed)
 thirdPartyCameraInfo.
@@ -25,8 +27,8 @@ Usage:
     sudo python3 onvif_diag.py --all               # include native (non-third-party) cams too
     sudo python3 onvif_diag.py --stdout            # print JSON instead of writing a file
 
-Review the output before sending it; secrets are stripped, but host IPs, MACs,
-and camera names remain.
+Review the output before sending it; usernames, passwords, and other secrets are
+stripped, but host IPs, camera models, and camera names remain.
 """
 import argparse
 import datetime
@@ -54,11 +56,12 @@ DEFAULT_DB = "/etc/unifi-protect/jsonDb/cameras.json"
 PKG = "/usr/share/unifi-protect/app/package.json"
 
 # Dropped wholesale (secret / high-entropy identifiers not needed to diagnose).
+# Usernames and passwords are NOT okay to keep (per the mod's redaction policy).
 SECRET_CAMERA_KEYS = {
-    "password", "authToken", "naclKeyPair", "fingerprint", "fingerprintSettings",
-    "anonymousDeviceId", "homekitAccessoryId", "homekitSettings",
+    "username", "password", "authToken", "naclKeyPair", "fingerprint",
+    "fingerprintSettings", "anonymousDeviceId", "homekitAccessoryId", "homekitSettings",
 }
-SECRET_TP_KEYS = {"password"}
+SECRET_TP_KEYS = {"username", "password"}
 URL_TP_KEYS = ("rtspUrl", "rtspUrlLQ", "snapshotUrl", "mediaUri")
 
 # Curated top-level fields kept per camera (others dropped to cut noise). Missing

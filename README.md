@@ -185,6 +185,17 @@ with** so the session cookie applies.
   reliably shows live on the Dashboard; the second can show black even though **Playback →
   Live works for both**. Workaround: **add the helper/manual lens first, then adopt the
   native ONVIF lens.** This is Protect's own behavior, not something the patch controls.
+- **Debug logging.** The mod logs one concise, human‑readable line per probe and per adopt to
+  Protect's own `cameras.thirdParty` logger (`/srv/unifi-protect/logs/cameras.thirdParty.log`,
+  which Protect already rotates — so no unbounded growth). Lines are prefixed `[onvif-mod]` and
+  cover the decision that was made, e.g.:
+  ```
+  [onvif-mod] probe 192.168.0.11:80 -> "Front" (tp-link Tapo C246D); 1 source(s), 3 stream(s); Front=[2304x1296 h264 | 1280x720 h264]
+  [onvif-mod] adopt 192.168.0.11:80 mode=manual; 2 stream(s); hq=1920x1080 h264; ptz=off; audio=true; snapshot=manual-url; salted=true; hqUri=rtsp://<redacted>@192.168.0.11/stream6
+  ```
+  IPs, ports, camera models, and names are kept (they help debugging); **usernames and passwords
+  are always redacted** — any `user:pass@` or `…?username=…&password=…` in a stream/snapshot URL is
+  replaced with `<redacted>` before logging. Skipped ONVIF re‑syncs log at `debug` level only.
 - Not affiliated with or endorsed by Ubiquiti.
 
 ---
