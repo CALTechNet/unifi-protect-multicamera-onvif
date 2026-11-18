@@ -34,14 +34,17 @@ After you authenticate to an ONVIF device you get a lightweight web page that:
 
 | | |
 |---|---|
-| Tested on | UniFi Protect **7.1.83** (Debian 11, arm64; UNVR / UDM‑class consoles) |
+| Console-tested | UniFi Protect **7.1.83** (Debian 11, ARM64) and **7.3.74** (Debian 13, ARM64, UDM Pro Max) |
+| Offline-verified | UniFi Protect **7.3.74** (Debian 11 and 13, ARM64) |
 | Node | the one Protect ships (`/usr/bin/node24`, Node 24) |
 | Touches | only `/usr/share/unifi-protect/app/service.js` (Protect's bundled backend) |
 
-It will likely work on nearby 7.1.x builds, but the patch matches exact code anchors in the
-minified bundle — if Protect changed those functions, `apply.sh` will refuse to patch
-(safe: it aborts instead of producing a broken file). See [How it works](#how-it-works) and
-[`SECURITY.md`](SECURITY.md) for the supported‑version policy.
+The patch matches exact code anchors in the minified bundle. If an anchor differs,
+`apply.sh` aborts before swapping in a new service bundle. The 7.3.74 offline check
+covers patching, Node 24 syntax validation, and probe, adoption, and refresh behavior
+with simulated ONVIF profiles. Live testing on 7.3.74 confirmed distinct dashboard
+tiles and HQ/LQ recording playback for both sensors of an AXIS P3715-PLVE.
+See [How it works](#how-it-works) and [`SECURITY.md`](SECURITY.md) for the supported-version policy.
 
 > ⚠️ **This is an unofficial modification of Ubiquiti's bundled code.** A Protect upgrade
 > replaces `service.js` and removes the mod — just re‑run `apply.sh`. Keep the backups the
@@ -117,6 +120,19 @@ The patch makes a handful of surgical edits to Protect's minified `service.js`. 
 is anchored to a unique string; `patch_onvif.py` asserts each anchor appears exactly once
 before replacing, and refuses to apply twice — so it either patches cleanly or aborts.
 
+Protect 7.3.74 uses a separate set of anchors for its updated ONVIF handlers.
+When the helper adopts a specific profile, it uses Protect's manual profile
+override to preserve the selected lens during periodic synchronization. It refreshes
+the ONVIF profile list after adoption so profiles recently added on the camera are
+available on an existing Protect device.
+
+To check a bundle extracted from the Protect package, run
+
+```bash
+python3 patch_onvif.py --input ./service.js --output ./service.patched.js
+node --check ./service.patched.js
+```
+
 | Area | Change |
 |---|---|
 | ONVIF profile parser (`fetchProfiles`) | carry the ONVIF `videoSourceToken` for each profile (Protect dropped it), so streams can be grouped by physical camera |
@@ -189,8 +205,9 @@ release tags; the latest tested state always lives on `main`.
 | UniFi Protect version | Status |
 |---|---|
 | **7.1.83** | ✅ Supported — developed and tested against this build |
+| **7.3.74** | Console-tested on Debian 13 ARM64. Offline-verified on Debian 11 ARM64. |
 | Other 7.1.x | ⚠️ Best effort — patches only if the anchors still match, **aborts safely** otherwise |
-| ≤ 7.0.x and ≥ 7.2.0 | ❌ Untested — expect a safe abort |
+| Other versions | Untested |
 
 The mod only adds routes behind Protect's existing **authenticated** third‑party‑camera API on
 its own origin; it stores no credentials and sends nothing to third parties. The anchored patch

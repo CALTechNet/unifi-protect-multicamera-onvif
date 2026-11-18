@@ -9,8 +9,9 @@ of this repo (there are none; the latest tested state always lives on `main`).
 | UniFi Protect version | Status |
 |---|---|
 | **7.1.83** | ✅ **Supported** — developed and tested against this build |
+| **7.3.74** | Console-tested on Debian 13 ARM64. Offline-verified on Debian 11 ARM64. |
 | Other 7.1.x | ⚠️ **Best effort** — `apply.sh` patches only if the code anchors still match, and **aborts safely** (no file written) if they don't |
-| ≤ 7.0.x and ≥ 7.2.0 | ❌ **Not supported / untested** — anchors are likely to have moved; expect a safe abort |
+| Other versions | Untested |
 
 Because the patch is anchored to exact strings in the minified bundle, it never produces a
 partially-modified file: `patch_onvif.py` asserts each of its anchors appears **exactly once**
@@ -42,6 +43,6 @@ Please **do not** open a public issue for a security problem.
   (Private Vulnerability Reporting), or
 - Open a [GitHub Security Advisory](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/security/advisories/new).
 
-Include the UniFi Protect version, the relevant patch anchor (R1–R11), and steps to reproduce.
+Include the UniFi Protect version, the relevant patch anchor from the script output, and steps to reproduce.
 Since this repo has no release cadence, accepted fixes are merged to `main` and you re-run
 `apply.sh` to pick them up.
