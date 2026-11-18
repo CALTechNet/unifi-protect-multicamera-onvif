@@ -30,9 +30,9 @@
   ul.streams li{ padding:8px 10px; border:1px solid #232b33; border-radius:8px; margin-bottom:8px; font-size:14px; background:#0e1318; }
   ul.streams li label{ display:flex; align-items:center; gap:10px; margin:0; text-transform:none; letter-spacing:0; font-size:14px; color:#e7ecf0; cursor:pointer; }
   ul.streams input[type=checkbox]{ width:16px; height:16px; accent-color:#2563eb; }
-  #status{ margin-top:14px; font-size:13px; min-height:18px; white-space:pre-wrap; }
-  #status.ok{ color:#34d399; }
-  #status.err{ color:#f87171; }
+  .status{ margin-top:14px; font-size:13px; min-height:18px; white-space:pre-wrap; }
+  .status.ok{ color:#34d399; }
+  .status.err{ color:#f87171; }
   b{ color:#cbd5e1; }
   code{ background:#0e1318; padding:1px 5px; border-radius:4px; font-size:12px; color:#9aa6b2; }
 </style>
@@ -40,7 +40,7 @@
 <body>
 <div class="wrap">
   <h1>ONVIF Camera &amp; Stream Picker</h1>
-  <p class="sub">Authenticate to an ONVIF camera, then choose which video source and streams to add to UniFi Protect.</p>
+  <p class="sub">List streams from an ONVIF camera or add an RTSP stream by URL.</p>
 
   <div class="card">
     <label for="host">Camera host <span style="text-transform:none;color:#5d6b78">(IP or IP:port, e.g. 192.168.1.50 or 192.168.1.50:80)</span></label>
@@ -60,18 +60,40 @@
 
   <div class="card" id="resultCard" style="display:none">
     <div id="result"></div>
-    <div id="status"></div>
+    <div id="status" class="status" role="status"></div>
+  </div>
+
+  <div class="card">
+    <label style="margin-top:0">Add an RTSP stream</label>
+    <p class="hint">Use this for an RTSP-only camera or a lens that ONVIF doesn't list.
+      If the stream requires credentials, include them in the high-quality URL.</p>
+    <label for="mName">Name (optional)</label>
+    <input type="text" id="mName" placeholder="Telephoto lens" autocomplete="off">
+    <label for="mHq">High-quality RTSP URL</label>
+    <input type="text" id="mHq" placeholder="rtsp://user:pass@192.168.1.50/stream6" autocomplete="off">
+    <label for="mLq">Low-quality RTSP URL (optional)</label>
+    <input type="text" id="mLq" placeholder="rtsp://192.168.1.50/stream7" autocomplete="off">
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;cursor:pointer">
+      <input type="checkbox" id="mAudio" style="width:16px;height:16px;accent-color:#2563eb"> This stream carries audio
+    </label>
+    <button id="addManualBtn" onclick="doAdoptManual()">Add stream URL as camera</button>
+    <div id="manualStatus" class="status" role="status"></div>
   </div>
 </div>
 
 <script>
 var BASE = location.pathname.replace(/\/onvif-helper$/, "");
 var probeData = null;
+var probeRequest = null;
 var csrfToken = null;
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-function setStatus(msg, isErr){ var s=$("status"); s.textContent=msg||""; s.className=isErr?"err":"ok"; }
+function setStatus(msg, isErr, id){
+  var s=$(id || "status");
+  s.textContent=msg||"";
+  s.className=isErr?"status err":"status ok";
+}
 
 // UniFi OS requires an X-CSRF-Token header on POST/PUT/DELETE. GETs are exempt and
 // the response carries the current token in x-updated-csrf-token. Capture it from
@@ -117,15 +139,19 @@ function postJson(path, body){
 
 function doProbe(){
   var host=$("host").value.trim(), u=$("user").value, p=$("pass").value;
-  if(!host){ $("resultCard").style.display="block"; setStatus("Enter a camera host.", true); return; }
+  probeData=null;
+  probeRequest=null;
   $("resultCard").style.display="block";
   $("result").innerHTML="";
+  if(!host){ setStatus("Enter a camera host.", true); return; }
   setStatus("Authenticating and probing streams...", false);
   $("probeBtn").disabled=true;
   var pre = csrfToken ? Promise.resolve() : seedCsrf();
-  pre.then(function(){ return postJson("/probe", { host:host, username:u, password:p }); })
+  var request={ host:host, username:u, password:p };
+  pre.then(function(){ return postJson("/probe", request); })
     .then(function(d){
       probeData=d;
+      probeRequest=request;
       renderProbe(d);
       setStatus("Connected to " + esc(d.name||"camera") + ". Found " + d.cameras.length + " video source(s).", false);
     })
@@ -145,29 +171,8 @@ function renderProbe(d){
   }
   html += "<div id=\"camBody\"></div>";
   html += "<button id=\"addBtn\" onclick=\"doAdopt()\">Add this camera</button>";
-  html += manualCardHtml();
   $("result").innerHTML=html;
   renderCam();
-}
-
-// Some cameras expose extra sensors only over direct RTSP, not ONVIF — e.g. the
-// telephoto lens on TP-Link Tapo dual-lens models (stream6/stream7). This lets you
-// add such a stream as its own Protect device. (issue #3)
-function manualCardHtml(){
-  return "<div class=\"card\" style=\"margin-top:18px;background:#10161c\">" +
-    "<label style=\"margin-top:0\">Stream not listed? Add one by URL</label>" +
-    "<p class=\"hint\" style=\"margin-bottom:4px\">For a lens/sensor exposed only via RTSP (e.g. a Tapo telephoto lens at " +
-    "<code>rtsp://&hellip;/stream6</code>). It becomes a separate Protect device.</p>" +
-    "<label for=\"mName\">Name <span style=\"text-transform:none;color:#5d6b78\">(optional)</span></label>" +
-    "<input type=\"text\" id=\"mName\" placeholder=\"Telephoto lens\" autocomplete=\"off\">" +
-    "<label for=\"mHq\">High-quality RTSP URL</label>" +
-    "<input type=\"text\" id=\"mHq\" placeholder=\"rtsp://user:pass@192.168.1.50/stream6\" autocomplete=\"off\">" +
-    "<label for=\"mLq\">Low-quality RTSP URL <span style=\"text-transform:none;color:#5d6b78\">(optional)</span></label>" +
-    "<input type=\"text\" id=\"mLq\" placeholder=\"rtsp://user:pass@192.168.1.50/stream7\" autocomplete=\"off\">" +
-    "<label style=\"display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;cursor:pointer\">" +
-    "<input type=\"checkbox\" id=\"mAudio\" style=\"width:16px;height:16px;accent-color:#2563eb\"> This stream carries audio</label>" +
-    "<button id=\"addManualBtn\" onclick=\"doAdoptManual()\">Add stream URL as camera</button>" +
-    "</div>";
 }
 
 function curCamIdx(){ var sel=$("camSel"); return sel?parseInt(sel.value,10):0; }
@@ -230,27 +235,42 @@ function doAdopt(){
 
 function doAdoptManual(){
   var hq=($("mHq").value||"").trim(), lq=($("mLq").value||"").trim(), nm=($("mName").value||"").trim();
-  var aud=!!($("mAudio")&&$("mAudio").checked);
-  if(!hq){ setStatus("Enter the high-quality RTSP URL for the stream.", true); return; }
-  var streams=[{ uri:hq, quality:"high", name:(nm||"Stream")+" (high)", hasAudio:aud }];
+  var aud=$("mAudio").checked;
+  function status(msg, isErr){ setStatus(msg, isErr, "manualStatus"); }
+  function parseUrl(value){
+    try{
+      var url=new URL(value);
+      if(/^rtsps?:\/\//i.test(value) && url.hostname){ return url; }
+    }catch(e){}
+    return null;
+  }
+  var high=parseUrl(hq), low=lq ? parseUrl(lq) : null;
+  if(!high){ status("Enter a high-quality URL starting with rtsp:// or rtsps://.", true); return; }
+  if(lq && !low){ status("Enter a low-quality URL starting with rtsp:// or rtsps://.", true); return; }
+  if(low && low.hostname.toLowerCase()!==high.hostname.toLowerCase()){
+    status("Use the same host for the high- and low-quality URLs.", true);
+    return;
+  }
+  // Keep the existing synthetic identity for extra lenses added after probing this camera.
+  var useOnvif=probeRequest && probeData.host.toLowerCase()===high.hostname.toLowerCase();
+  var streams=[{ uri:hq, quality:"high", name:useOnvif?(nm||"Stream")+" (high)":nm, hasAudio:aud }];
   if(lq){ streams.push({ uri:lq, quality:"low", name:(nm||"Stream")+" (low)", hasAudio:aud }); }
   var body={
-    host: $("host").value.trim(),
-    username: $("user").value,
-    password: $("pass").value,
+    host: useOnvif ? probeRequest.host : high.hostname,
+    username: useOnvif ? probeRequest.username : "",
+    password: useOnvif ? probeRequest.password : "",
     manualStreams: streams,
-    // Always salt so the manual stream becomes its own device, distinct from the
-    // ONVIF cameras on the same rig.
-    macSalt: "manual:" + (nm || hq)
+    rtspOnly: !useOnvif
   };
-  setStatus("Adding stream to Protect...", false);
+  if(useOnvif){ body.macSalt="manual:" + (nm || hq); }
+  status("Adding stream to Protect...", false);
   $("addManualBtn").disabled=true;
   postJson("/adopt", body)
     .then(function(c){
       var n2 = (c && (c.name || c.id)) || "camera";
-      setStatus("Added \"" + esc(n2) + "\" from URL. Open the Devices list in Protect to configure it.", false);
+      status("Added \"" + n2 + "\" from URL. Open the Devices list in Protect to configure it.", false);
     })
-    .catch(function(e){ setStatus("Adopt failed: " + (e && e.message ? e.message : e), true); })
+    .catch(function(e){ status("Adopt failed: " + (e && e.message ? e.message : e), true); })
     .then(function(){ $("addManualBtn").disabled=false; });
 }
 
