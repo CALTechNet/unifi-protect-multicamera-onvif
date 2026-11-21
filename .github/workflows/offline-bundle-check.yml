@@ -1,0 +1,27 @@
+name: One-time Protect 7.3 bundle validation
+on:
+  push:
+    branches: [fix/integrate-pr20-rtsp-only]
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download and validate official current Protect Debian 13 ARM64 bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://fw-update.ubnt.com/api/firmware-latest?filter=eq~~product~~unifi-protect&filter=eq~~channel~~release&filter=eq~~platform~~uos-deb13-arm64'
+          curl -fsSL --retry 2 "$url" -o /tmp/protect-releases.json
+          deb="$(jq -r '._embedded.firmware[0]._links.data.href // empty' /tmp/protect-releases.json)"
+          test -n "$deb"
+          echo "Downloaded URL: $deb"
+          curl -fL --retry 2 "$deb" -o /tmp/unifi-protect.deb
+          mkdir -p /tmp/protect-extracted
+          dpkg-deb -x /tmp/unifi-protect.deb /tmp/protect-extracted
+          test -f /tmp/protect-extracted/usr/share/unifi-protect/app/service.js
+          python3 patch_onvif.py --input /tmp/protect-extracted/usr/share/unifi-protect/app/service.js --output /tmp/service-patched.js
+          node --check /tmp/service-patched.js
