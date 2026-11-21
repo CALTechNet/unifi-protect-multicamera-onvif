@@ -216,7 +216,7 @@ function doAdopt(){
   // Leave the FIRST/only source on the device's real MAC so Protect's own ONVIF
   // discovery sees the rig as adopted and stops offering it. Salt only the extra
   // sources so they land as separate Protect devices. (issue #1)
-  if(curCamIdx()>0 && cam.videoSourceToken){ body.macSalt = cam.videoSourceToken; }
+  if(curCamIdx()>0 && cam.videoSourceToken != null){ body.macSalt = String(cam.videoSourceToken); }
   setStatus("Adding camera to Protect...", false);
   $("addBtn").disabled=true;
   postJson("/adopt", body)
