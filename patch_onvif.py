@@ -31,6 +31,56 @@ edits.append((
  r'''const o=(0,a.replaceUrlHostname)(await(0,n.getStreamUri)(u,t.token),e);let __snap;try{__snap=(0,a.replaceUrlHostname)(await(0,n.getSnapshotUri)(u,t.token),e)}catch(__e){__snap=void 0}g.push({resolution:r.resolution,encoding:r.encoding,quality:r.quality,bitrate:r.rateControl.bitrateLimit,fps:r.rateControl.frameRateLimit,uri:o,hasAudio:i,profileToken:t.token,profileName:t.name,videoSourceToken:t.videoSourceToken,snapshotUri:__snap})''',
 ))
 
+RTSP_CAMERA = r'''
+function readRtspCamera(request) {
+    const { BadRequestError } = r(23957);
+    const streams = request.manualStreams;
+    if ("camera" in request || !streams || streams.length < 1 || streams.length > 2) {
+        throw new BadRequestError("Supply one high-quality RTSP URL and optionally one low-quality URL.");
+    }
+    let urls, credentials;
+    try {
+        urls = streams.map(({ uri }) => {
+            const url = new URL(uri);
+            if (!/^rtsps?:\/\//i.test(uri) || !url.hostname) throw new Error();
+            return url;
+        });
+        credentials = urls.map(url => [decodeURIComponent(url.username), decodeURIComponent(url.password)]);
+    } catch {
+        throw new BadRequestError("Use a valid rtsp:// or rtsps:// URL for each stream.");
+    }
+    const high = urls[0];
+    const host = high.hostname.toLowerCase();
+    const [username, password] = credentials[0];
+    if (urls[1] && urls[1].hostname.toLowerCase() !== host) {
+        throw new BadRequestError("The high- and low-quality RTSP streams must use the same host.");
+    }
+    const [lowUser, lowPass] = credentials[1] || [];
+    if ((lowUser || lowPass) && (lowUser !== username || lowPass !== password)) {
+        throw new BadRequestError("Use the same credentials for both RTSP streams.");
+    }
+    const defaultPort = high.protocol === "rtsps:" ? "322" : "554";
+    const port = high.port || defaultPort;
+    const cleanStreams = urls.map((url, index) => {
+        url.username = url.password = url.hash = "";
+        return { ...streams[index], uri: url.href };
+    });
+    high.hostname = host;
+    if (high.port === defaultPort) high.port = "";
+    const id = r(76982).createHash("sha256").update("rtsp-only|" + high.href).digest().subarray(0, 6);
+    id[0] = (id[0] & 254) | 2;
+    return { host, port, username, password, streams: cleanStreams,
+        name: streams[0].name?.trim() || host, mac: id.toString("hex").toUpperCase() };
+}
+'''
+
+
+# Preserve the 7.1 synthetic identity on 7.3 with Node 24 built-in crypto.
+RTSP_CAMERA_7_3 = (RTSP_CAMERA
+    .replace("const { BadRequestError } = r(23957);", "const BadRequestError = s.BadRequestError;")
+    .replace('r(76982).createHash("sha256")',
+             'process.getBuiltinModule("node:crypto").createHash("sha256")'))
+
 # R4: adopt subscriber -> (a) honor selected profileTokens before building channels;
 #     (b) optionally build channels from caller-supplied manual RTSP URLs for streams
 #         the camera doesn't expose over ONVIF, e.g. a Tapo telephoto lens (issue #3);
@@ -38,7 +88,7 @@ edits.append((
 edits.append((
  "R4 adopt stream selection + manual streams + per-source snapshot",
  r'''const{streams:E,hqStream:_,lqStream:T,encoding:A}=(0,p.getStreamData)(S),R=S.snapshotUri;''',
- r'''const __man=Array.isArray(t.manualStreams)?t.manualStreams.filter(m=>m&&m.uri):[],__sel=Array.isArray(t.profileTokens)&&t.profileTokens.length>0?t.profileTokens:null,__Sx=__sel?{...S,streams:S.streams.filter(x=>__sel.includes(x.profileToken)).sort((a,b)=>__sel.indexOf(a.profileToken)-__sel.indexOf(b.profileToken))}:S,__Sf=__man.length>0?{...S,ptz:!1,streams:__man.map((m,i)=>({resolution:{width:Number(m.width)||(0===i?1920:640),height:Number(m.height)||(0===i?1080:480)},encoding:m.encoding||"h264",quality:"",bitrate:Number(m.bitrate)>0?Number(m.bitrate):(0===i?2048:512),fps:Number(m.fps)>0?Number(m.fps):30,uri:m.uri,hasAudio:!!m.hasAudio,profileToken:"manual-"+i,profileName:m.name||"Manual stream "+(i+1),videoSourceToken:t.macSalt||"manual",snapshotUri:void 0}))}:__sel&&__Sx.streams.length>0?__Sx:S;const{streams:E,hqStream:_,lqStream:T,encoding:A}=(0,p.getStreamData)(__Sf),R=_&&_.snapshotUri||S.snapshotUri;''',
+ r'''const __man=__rtsp?__rtsp.streams:Array.isArray(t.manualStreams)?t.manualStreams.filter(m=>m&&m.uri):[],__sel=!__rtsp&&Array.isArray(t.profileTokens)&&t.profileTokens.length>0?t.profileTokens:null,__Sx=__sel?{...S,streams:S.streams.filter(x=>__sel.includes(x.profileToken)).sort((a,b)=>__sel.indexOf(a.profileToken)-__sel.indexOf(b.profileToken))}:S,__Sf=__man.length>0?{...S,ptz:!1,streams:__man.map((m,i)=>({resolution:{width:Number(m.width)||(0===i?1920:640),height:Number(m.height)||(0===i?1080:480)},encoding:m.encoding||"h264",quality:"",bitrate:Number(m.bitrate)>0?Number(m.bitrate):(0===i?2048:512),fps:Number(m.fps)>0?Number(m.fps):30,uri:m.uri,hasAudio:!!m.hasAudio,profileToken:(__rtsp?"manual-rtsp-":"manual-")+i,profileName:m.name||"Manual stream "+(i+1),videoSourceToken:t.macSalt||"manual",snapshotUri:void 0}))}:__sel&&__Sx.streams.length>0?__Sx:S;const{streams:E,hqStream:_,lqStream:T,encoding:A}=(0,p.getStreamData)(__Sf),R=_&&_.snapshotUri||S.snapshotUri;''',
 ))
 
 # R14: build the camera settings from the (manual-aware) __Sf instead of S, so manual
@@ -48,15 +98,20 @@ edits.append((
 #   carries ptz:false for manual adopts and S's own ptz otherwise. (issue #10)
 edits.append((
  "R14 adopt camera settings from __Sf (ptz off for manual)",
- r'''(0,m.getOnvifDefaultCameraSettings)(e.store,S,E)''',
- r'''(0,m.getOnvifDefaultCameraSettings)(e.store,__Sf,E)''',
+ r'''return await h.updateAndSave({host:v,...(0,m.getOnvifDefaultCameraSettings)(e.store,S,E)''',
+ r'''const settings=(0,m.getOnvifDefaultCameraSettings)(e.store,__Sf,E);
+ if(__rtsp){
+     settings.featureFlags.hasMotionDetection=false;
+     settings.recordingSettings.enableMotionDetection=false;
+ }
+ return await h.updateAndSave({host:v,...settings''',
 ))
 
 # R5: adopt subscriber -> optional per-source MAC salt so multiple cameras behind one endpoint stay distinct
 edits.append((
  "R5 adopt mac salt",
  r'''const e=await(0,u.getMAC)(v,S);n.default.ok(e,"Failed to get MAC address"),h=null!==(r=o.findByMac("camera",e))&&void 0!==r?r:o.createRecord("camera",{mac:e})''',
- r'''let e=await(0,u.getMAC)(v,S);n.default.ok(e,"Failed to get MAC address"),t.macSalt&&(e='''
+ r'''let e=__rtsp?__rtsp.mac:await(0,u.getMAC)(v,S);n.default.ok(e,"Failed to get MAC address"),!__rtsp&&t.macSalt&&(e='''
  + SALTED_MAC + r'''),h=null!==(r=o.findByMac("camera",e))&&void 0!==r?r:o.createRecord("camera",{mac:e})''',
 ))
 
@@ -74,25 +129,42 @@ edits.append((
  r'''t.probe=async(e,t)=>{const{username:c,password:g}=t;let v,y;if("camera"in t){const h=t.camera;v=h.host,y=h.thirdPartyCameraInfo.port}else{if(!("host"in t))throw new Error("Invalid probe parameters");[v,y="80"]=t.host.split(":")}n.default.ok(v,"Missing camera host"),n.default.ok(y,"Missing camera port");const S=await(0,l.getCameraDetails)(v,y.toString(),c,g,{});if(!S.success)throw new s.UnauthorizedError({details:S.errors});const G=new Map;for(const st of S.streams){const en=(st.encoding||"").toLowerCase();if(!en.includes("264")&&!en.includes("265"))continue;const k=st.videoSourceToken||"__default__";G.has(k)||G.set(k,[]),G.get(k).push({profileToken:st.profileToken,profileName:st.profileName||st.profileToken,encoding:st.encoding,width:st.resolution?st.resolution.width:0,height:st.resolution?st.resolution.height:0,fps:st.fps,bitrate:st.bitrate,hasAudio:!!st.hasAudio})}const cams=Array.from(G.entries()).map(([k,arr],idx)=>(arr.sort((a,b)=>b.width-a.width),{videoSourceToken:"__default__"===k?null:k,label:"__default__"===k?S.name||"Camera "+(idx+1):(S.name||"Camera")+" #"+(idx+1),streams:arr}));return{name:S.name,ptz:!!S.ptz,success:!0,errors:S.errors,host:v,port:String(y),cameras:cams}};t.adopt=async(e,t)=>{var r;const{store:o}=e,{username:c,password:g}=t;try{let h,v,y;''',
 ))
 
+# R15: validate RTSP-only requests and skip ONVIF details and credentials.
+edits.append((
+ "R15 adopt RTSP-only streams without ONVIF",
+ r'''t.adopt=async(e,t)=>{var r;const{store:o}=e,{username:c,password:g}=t;try{let h,v,y;if("camera"in t)h=t.camera,v=h.host,y=h.thirdPartyCameraInfo.port;else{if(!("host"in t))throw new Error("Invalid adoption parameters");[v,y="80"]=t.host.split(":")}n.default.ok(v,"Missing camera host"),n.default.ok(y,"Missing camera port");const S=await(0,l.getCameraDetails)(v,y.toString(),c,g,{fetchHwAddress:!0});if(f.info(`Adopting camera at ${v}:${y} with details`,S),!S.success)throw new s.UnauthorizedError({details:S.errors});''',
+ RTSP_CAMERA + r'''t.adopt=async(e,t)=>{var r;const{store:o}=e;let{username:c,password:g}=t;const __rtsp=t.rtspOnly?readRtspCamera(t):null;
+ try{let h,v,y,S;
+ if(__rtsp){
+     ({host:v,port:y,username:c,password:g}=__rtsp);
+     S={success:true,name:__rtsp.name,ptz:false,errors:[]};
+ }else{
+     if("camera"in t)h=t.camera,v=h.host,y=h.thirdPartyCameraInfo.port;else{if(!("host"in t))throw new Error("Invalid adoption parameters");[v,y="80"]=t.host.split(":")}
+     n.default.ok(v,"Missing camera host"),n.default.ok(y,"Missing camera port");
+     S=await(0,l.getCameraDetails)(v,y.toString(),c,g,{fetchHwAddress:!0});
+     if(f.info(`Adopting camera at ${v}:${y} with details`,S),!S.success)throw new s.UnauthorizedError({details:S.errors});
+ }''',
+))
+
 # R8: extend adopt/probe request schema to allow profileTokens + macSalt + manualStreams
 edits.append((
  "R8 router schema profileTokens/macSalt/manualStreams",
  r'''.and(i.z.object({username:i.z.string(),password:i.z.string()}))''',
- r'''.and(i.z.object({username:i.z.string(),password:i.z.string(),profileTokens:i.z.array(i.z.string()).optional(),macSalt:i.z.string().optional(),manualStreams:i.z.array(i.z.object({uri:i.z.string(),quality:i.z.string().optional(),name:i.z.string().optional(),encoding:i.z.string().optional(),width:i.z.number().optional(),height:i.z.number().optional(),hasAudio:i.z.boolean().optional(),fps:i.z.number().optional(),bitrate:i.z.number().optional()})).optional()}))''',
+ r'''.and(i.z.object({username:i.z.string(),password:i.z.string(),profileTokens:i.z.array(i.z.string()).optional(),macSalt:i.z.string().optional(),rtspOnly:i.z.boolean().optional(),manualStreams:i.z.array(i.z.object({uri:i.z.string(),quality:i.z.string().optional(),name:i.z.string().optional(),encoding:i.z.string().optional(),width:i.z.number().optional(),height:i.z.number().optional(),hasAudio:i.z.boolean().optional(),fps:i.z.number().optional(),bitrate:i.z.number().optional()})).optional()}))''',
 ))
 
 # R9: thread selection through adopt route (camera branch)
 edits.append((
  "R9 router adopt n camera branch",
  r'''n={camera:t,username:i,password:a,user:e.user}''',
- r'''n={camera:t,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,manualStreams:e.body.manualStreams}''',
+ r'''n={camera:t,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,rtspOnly:e.body.rtspOnly,manualStreams:e.body.manualStreams}''',
 ))
 
 # R10: thread selection through adopt route (host branch)
 edits.append((
  "R10 router adopt n host branch",
  r'''else n={host:o,username:i,password:a,user:e.user}''',
- r'''else n={host:o,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,manualStreams:e.body.manualStreams}''',
+ r'''else n={host:o,username:i,password:a,user:e.user,profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,rtspOnly:e.body.rtspOnly,manualStreams:e.body.manualStreams}''',
 ))
 
 # R12: don't let Protect's periodic ONVIF re-sync overwrite a manually-added stream.
@@ -115,6 +187,21 @@ edits.append((
  "R13 skip ONVIF info refresh for manual streams",
  r'''t.updateOnvifCameraInfo=async(e,t)=>{i.default.ok(e.host,"Camera host is not defined")''',
  r'''t.updateOnvifCameraInfo=async(e,t)=>{if(e.thirdPartyCameraInfo&&"string"==typeof e.thirdPartyCameraInfo.profileToken&&0===e.thirdPartyCameraInfo.profileToken.indexOf("manual"))return;i.default.ok(e.host,"Camera host is not defined")''',
+))
+
+# R16: RTSP-only cameras have no ONVIF event service.
+edits.append((
+ "R16 skip motion event subscription for RTSP-only cameras",
+ r'''if(!r||!r.isThirdPartyCamera||!r.mac)return;const n=r.mac;if(!r.recordingSettings.enableMotionDetection)''',
+ r'''if(!r||!r.isThirdPartyCamera||!r.mac||r.thirdPartyCameraInfo.profileToken?.startsWith("manual-rtsp-"))return;const n=r.mac;if(!r.recordingSettings.enableMotionDetection)''',
+))
+
+# R17: Keep the existing stream-based health check. An ONVIF probe can't tell
+# whether an RTSP-only camera is reachable when its stream is down.
+edits.append((
+ "R17 skip ONVIF health fallback for RTSP-only cameras",
+ r'''continue}const t=r.host;if(!t){c.warn(`Third party camera ${r.logId} has no host, can't run health check, skipping`);''',
+ r'''continue}if(r.thirdPartyCameraInfo.profileToken?.startsWith("manual-rtsp-"))continue;const t=r.host;if(!t){c.warn(`Third party camera ${r.logId} has no host, can't run health check, skipping`);''',
 ))
 
 # ---- R11: add /probe route, the helper HTML, and the /onvif-helper GET route ----
@@ -202,40 +289,50 @@ def protect_7_3_edits():
         host:hostname, port:String(port), cameras};
     };
     '''
-    replace("7.3 probe subscriber", ADOPT_7_3, probe + ADOPT_7_3)
+    replace("7.3 probe subscriber", ADOPT_7_3, probe + RTSP_CAMERA_7_3 + ADOPT_7_3.replace(
+        'const{store:r}=e,{username:o,password:d}=t;try',
+        'const{store:r}=e;let{username:o,password:d}=t;const __rtsp=t.rtspOnly?readRtspCamera(t):null;try'))
     subscriber = '"thirdPartyCameras.adopt":d.adopt,'
     replace("7.3 subscriber registry", subscriber, subscriber + '"thirdPartyCameras.probe":d.probe,')
 
     # Reuse the 7.1 hash so virtual MAC addresses survive Protect updates.
-    selection = '''const __manual = t.manualStreams?.length > 0;
-    const __selected = t.profileTokens?.length > 0;
+    selection = '''const __sourceStreams=__rtsp?.streams??t.manualStreams;
+    const __manual = __sourceStreams?.length > 0;
+    const __selected = !__rtsp && t.profileTokens?.length > 0;
     const __override = __manual || __selected;
-    const __details = __manual ? {...C, ptz:false, streams:t.manualStreams.map((stream,index) => ({
+    const __details = __manual ? {...C, ptz:false, streams:__sourceStreams.map((stream,index) => ({
       resolution:{width:stream.width || (index ? 640 : 1920), height:stream.height || (index ? 480 : 1080)},
       encoding:stream.encoding || "h264", quality:"", bitrate:stream.bitrate > 0 ? stream.bitrate : (index ? 512 : 2048),
       fps:stream.fps > 0 ? stream.fps : 30, uri:stream.uri, hasAudio:!!stream.hasAudio,
-      profileToken:"manual-" + index
+      profileToken:(__rtsp?"manual-rtsp-":"manual-") + index
     }))} : __selected ? {...C, streams:C.streams.filter(stream => t.profileTokens.includes(stream.profileToken))} : C;
     const b=(0,h.getStreamData)(__details);'''
     replace("7.3 probe selected profile snapshots", 'o,d,{fetchHwAddress:!0});if(T.info(`Adopting camera at',
             'o,d,{fetchHwAddress:!0,snapshotProfileTokens:t.profileTokens});if(T.info(`Adopting camera at')
     replace("7.3 selected streams", 'const b=(0,h.getStreamData)(C);', selection)
+    replace("7.3 RTSP-only bypass ONVIF connection",
+            'const C=await(0,p.getCameraDetails)(I,R.toString(),o,d,{fetchHwAddress:!0,snapshotProfileTokens:t.profileTokens});',
+            'if(__rtsp){I=__rtsp.host;R=__rtsp.port;o=__rtsp.username;d=__rtsp.password}'
+            'const C=__rtsp?{success:true,name:__rtsp.name,ptz:false,errors:[],streams:__rtsp.streams}:'
+            'await(0,p.getCameraDetails)(I,R.toString(),o,d,{fetchHwAddress:!0,snapshotProfileTokens:t.profileTokens});')
     identity = '''N=__manual ? null : M.snapshotUri ?? C.snapshotUri;
-      const P=await (0,g.getMAC)(I,C);
-      const __mac = P && t.macSalt ? (e => ''' + SALTED_MAC + ''')(P) : P;
-      A=await (0,v.onvifResolveAdoptionCamera)(r,t.macSalt ? void 0 : A,__mac,T),'''
+      const P=__rtsp?__rtsp.mac:await (0,g.getMAC)(I,C);
+      const __mac = !__rtsp && P && t.macSalt ? (e => ''' + SALTED_MAC + ''')(P) : P;
+      A=await (0,v.onvifResolveAdoptionCamera)(r,t.macSalt || __rtsp ? void 0 : A,__mac,T),'''
     replace("7.3 source snapshot and identity",
             'N=C.snapshotUri,P=await(0,g.getMAC)(I,C);A=await(0,v.onvifResolveAdoptionCamera)(r,A,P,T),',
             identity)
     replace("7.3 selected camera settings", '(0,y.getOnvifDefaultCameraSettings)(e.store,C,O,k,F)',
-            '(0,y.getOnvifDefaultCameraSettings)(e.store,__details,O,k,F)')
+            '((settings)=>{if(__rtsp){settings.featureFlags.hasMotionDetection=false;'
+            'settings.recordingSettings.enableMotionDetection=false}return settings})'
+            '((0,y.getOnvifDefaultCameraSettings)(e.store,__details,O,k,F))')
     camera_info = 'rtspUrlLQ:null==D?void 0:D.uri,profileTokenLQ:null==D?void 0:D.profileToken,snapshotUrl:N'
     replace("7.3 persist selected profile override", camera_info,
             'rtspUrlLQ:D?.uri??(__override?null:void 0),profileTokenLQ:D?.profileToken??(__override?null:void 0),'
             'snapshotUrl:N,...__override?{manualProfileOverride:!0,hasAudio:!!M.hasAudio}:{}')
     replace("7.3 refresh profile capabilities after selected adoption",
             '(0,_.seedAvailableProfiles)(A,{overwriteExisting:!0}).catch',
-            '__seedAdoptedProfiles(A,__selected).catch')
+            '(__rtsp?Promise.resolve():__seedAdoptedProfiles(A,__selected)).catch')
 
     sync_prologue = 't.syncOnvifCameraConfig=async(e,t,r)=>{var a,f,h,v;if(!r.success)return;'
     replace("7.3 preserve manual RTSP URLs during sync", sync_prologue,
@@ -270,13 +367,13 @@ def protect_7_3_edits():
     credentials = '.and(a.z.object({username:a.z.string(),password:a.z.string()}))'
     replace("7.3 adoption request schema", credentials,
             credentials[:-3] + ',profileTokens:a.z.array(a.z.string()).optional(),macSalt:a.z.string().optional(),'
-            'manualStreams:a.z.array(a.z.object({uri:a.z.string().regex(/^rtsps?:\\/\\//i),'
+            'rtspOnly:a.z.boolean().optional(),manualStreams:a.z.array(a.z.object({uri:a.z.string().regex(/^rtsps?:\\/\\//i),'
             'quality:a.z.string().optional(),name:a.z.string().optional(),encoding:a.z.string().optional(),'
             'width:a.z.number().optional(),height:a.z.number().optional(),hasAudio:a.z.boolean().optional(),'
             'fps:a.z.number().optional(),bitrate:a.z.number().optional()})).optional()}))')
     for request in ('n={camera:t,username:i,password:a,user:e.user}', 'else n={host:o,username:i,password:a,user:e.user}'):
         replace("7.3 pass adoption options", request,
-                request[:-1] + ',profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,manualStreams:e.body.manualStreams}')
+                request[:-1] + ',profileTokens:e.body.profileTokens,macSalt:e.body.macSalt,rtspOnly:e.body.rtspOnly,manualStreams:e.body.manualStreams}')
 
     # Match the stock adoption route's permission checks and request validation.
     permissions = '''(0,_.validateUserPermission)(c.AccessMode.CREATE,"camera"),
