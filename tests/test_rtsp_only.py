@@ -57,7 +57,7 @@ for (const parse of [a,b]) {
   assert.throws(() => parse({manualStreams:[{uri:'rtsp://u:p@10.0.0.5/a'}, {uri:'rtsp://u:wrong@10.0.0.5/b'}]}));
 }
 assert.equal(a(request).mac, b(request).mac, 'MAC stays stable across versions');
-const htmlScript = payload.html.match(/<script>([\\s\\S]*?)<\\/script>/)[1];
+const htmlScript = payload.html.slice(payload.html.indexOf('<script>') + 8, payload.html.indexOf('</script>'));
 new vm.Script(htmlScript);
 assert.match(payload.html,/rtspOnly: !useOnvif/);
 assert.match(payload.html,/cam.videoSourceToken != null/);
