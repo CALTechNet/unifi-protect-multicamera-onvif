@@ -93,10 +93,14 @@ download the repo as a zip. They must sit together in the same directory.
    username / password, click **Authenticate & list streams**.
 4. Pick the video source (if more than one) and tick the streams you want, then
    **Add this camera**. It appears in Protect's Devices list.
-5. **A lens/sensor not in the list?** Some cameras expose extra sensors only over direct
-   RTSP, not ONVIF (e.g. a Tapo dual‑lens camera's telephoto lens at `…/stream6` and
-   `…/stream7`). Use **Add stream URL as camera** at the bottom: paste the high‑quality
-   RTSP URL (and optionally a low‑quality one), and it's adopted as its own device.
+ 
+### Add by RTSP URL
+
+Use **Add stream URL as camera** for an RTSP-only camera or a lens that ONVIF doesn't
+list. The URL form is available immediately, without ONVIF probing. Paste the HQ RTSP
+URL and optionally an LQ URL from the same host. Include credentials in the HQ URL
+if necessary (`rtsp://user:password@192.168.1.50/stream1`). Protect uses the same
+credentials for both streams.
 
 The page only talks to Protect's own authenticated API on the same origin; it stores
 nothing and sends nothing anywhere else.
@@ -138,8 +142,8 @@ node --check ./service.patched.js
 | ONVIF profile parser (`fetchProfiles`) | carry the ONVIF `videoSourceToken` for each profile (Protect dropped it), so streams can be grouped by physical camera |
 | Probe (`getCameraDetails`) | include `profileName` + `videoSourceToken` on every probed stream, and capture a **per‑profile snapshot URI** so each video source gets its own thumbnail |
 | New `probe` action | authenticate and return streams grouped by video source **without** adopting (`POST /third-party-cameras/probe`) |
-| Adopt subscriber | accept optional `profileTokens` (ordered selection) → build channels from exactly those; optional `manualStreams` build channels from caller‑supplied RTSP URLs (non‑ONVIF sensors); use the chosen source's snapshot as the thumbnail; optional `macSalt` keeps multiple sources distinct |
-| Router | extend the request schema with `profileTokens` + `macSalt` + `manualStreams`; add the `probe` route and serve the picker page at `GET /third-party-cameras/onvif-helper` |
+| Adopt subscriber | accept `profileTokens` for ONVIF stream selection, `manualStreams` for RTSP URLs, `rtspOnly` to bypass ONVIF discovery, and `macSalt` for multiple ONVIF sources; preserve selected snapshots |
+| Router | accept and forward `profileTokens`, `macSalt`, `manualStreams`, and `rtspOnly`; add the `probe` route and picker page at `GET /third-party-cameras/onvif-helper` |
 | ONVIF re‑sync (`syncOnvifCameraConfig` / `updateOnvifCameraInfo`) | **skip** cameras tagged as manual (`profileToken` of `manual-*`) so Protect's periodic ONVIF re‑probe doesn't overwrite a hand‑entered stream URL back to the camera's ONVIF profiles |
 
 The picker page is served by that GET route from the same origin as Protect, so it shares
@@ -159,7 +163,7 @@ with** so the session cookie applies.
 | File | Purpose |
 |---|---|
 | `apply.sh` | backup → patch → syntax‑check → swap → install the page to the runtime path |
-| `patch_onvif.py` | the 14 anchored edits; reads `onvif_helper.html` from its own directory |
+| `patch_onvif.py` | version-specific anchored edits; reads `onvif_helper.html` from its own directory |
 | `onvif_helper.html` | the picker UI; installed to `/etc/unifi-protect/onvif-mod/` (read live) and embedded in `service.js` as a fallback |
 | `tools/onvif_diag.py` | diagnostics: dumps a **redacted** snapshot of third‑party camera records grouped by host (for multi‑lens bug reports) — `sudo python3 tools/onvif_diag.py` |
 
@@ -175,12 +179,11 @@ with** so the session cookie applies.
   distinct ONVIF `VideoSourceConfiguration` token per sensor. Devices that don't will show
   as a single camera with all streams listed (still fully usable). For a sensor that isn't
   advertised over ONVIF at all, use **Add stream URL as camera**.
-- Manual stream URLs are adopted on top of an ONVIF authentication to the same host (used
-  for the device name, MAC, and a fallback thumbnail), so the camera must still answer
-  ONVIF on at least one lens. Protect refines the channel resolution from the live stream
-  once connected. The mod **suppresses Protect's periodic ONVIF re‑sync** for these manual
-  cameras, otherwise it would overwrite your hand‑entered URL with the camera's ONVIF
-  (wide‑lens) stream. Re‑adopt the stream if you ever change the URL.
+- When the helper has already probed the same host, manually added lenses keep the
+  ONVIF-backed identity and fallback thumbnail. RTSP-only streams instead use a stable
+  synthetic device ID derived from the HQ URL (without embedded credentials).
+- Protect refines resolution from the live stream. Periodic ONVIF re-sync is disabled
+  for manual streams so their URLs are not overwritten. Re-adopt after changing a URL.
 - Adopting via **Add stream URL** or a non‑first video source always uses a synthetic MAC,
   so it lands as a separate Protect device and never collides with the primary.
 - Manual‑stream cameras adopt with **PTZ disabled** (a raw RTSP stream has no ONVIF PTZ
@@ -205,7 +208,7 @@ release tags; the latest tested state always lives on `main`.
 | UniFi Protect version | Status |
 |---|---|
 | **7.1.83** | ✅ Supported — developed and tested against this build |
-| **7.3.74** | Console-tested on Debian 13 ARM64. Offline-verified on Debian 11 ARM64. |
+| **7.3.74** | ONVIF multi-lens support console-tested on Debian 13 ARM64. RTSP-only adoption requires fresh runtime verification. |
 | Other 7.1.x | ⚠️ Best effort — patches only if the anchors still match, **aborts safely** otherwise |
 | Other versions | Untested |
 
