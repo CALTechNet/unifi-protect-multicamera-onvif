@@ -18,8 +18,9 @@ After you authenticate to an ONVIF device you get a lightweight web page that:
   add becomes its own Protect device. The **first** source keeps the rig's real MAC so
   Protect's own discovery stops offering it once adopted; the extra sources get a
   per‑source synthetic MAC to stay distinct.
-- Gives each adopted source **its own thumbnail** (the snapshot is fetched per video
-  source, not once per device).
+- Requests a per-profile snapshot for each selected source where the camera supports it.
+  A reported issue with thumbnails reverting after adoption is still being investigated
+  (see [#2](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/2)).
 - Lets you add a stream **by URL** for a sensor the camera doesn't advertise over ONVIF —
   e.g. the telephoto lens on TP‑Link Tapo dual‑lens models (`…/stream6`).
 
@@ -37,13 +38,17 @@ After you authenticate to an ONVIF device you get a lightweight web page that:
 | Console-tested | UniFi Protect **7.1.83** (Debian 11, ARM64) and **7.3.74** (Debian 13, ARM64, UDM Pro Max) |
 | Offline-verified | UniFi Protect **7.3.74** (Debian 11 and 13, ARM64) |
 | Node | the one Protect ships (`/usr/bin/node24`, Node 24) |
-| Touches | only `/usr/share/unifi-protect/app/service.js` (Protect's bundled backend) |
+| Modifies | `/usr/share/unifi-protect/app/service.js` and installs the helper HTML under `/etc/unifi-protect/onvif-mod/` |
 
-The patch matches exact code anchors in the minified bundle. If an anchor differs,
-`apply.sh` aborts before swapping in a new service bundle. The 7.3.74 offline check
-covers patching, Node 24 syntax validation, and probe, adoption, and refresh behavior
-with simulated ONVIF profiles. Live testing on 7.3.74 confirmed distinct dashboard
-tiles and HQ/LQ recording playback for both sensors of an AXIS P3715-PLVE.
+The patch uses exact code anchors in the minified bundle and rejects unsupported
+anchors. A successful patch and syntax check **do not prove runtime compatibility**.
+In particular, [Protect 7.1.87](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/16)
+has a report of incorrect selected streams even though cameras can be added.
+
+For 7.3.74, the official Debian 13 ARM64 bundle has passed an offline patch and Node 24
+syntax check with RTSP-only support included. The contributor also reported a successful
+live ONVIF multi-lens test on a UDM Pro Max with an AXIS P3715-PLVE. **Live RTSP-only
+recording and playback have not been confirmed on a console.**
 See [How it works](#how-it-works) and [`SECURITY.md`](SECURITY.md) for the supported-version policy.
 
 > ⚠️ **This is an unofficial modification of Ubiquiti's bundled code.** A Protect upgrade
@@ -57,13 +62,18 @@ See [How it works](#how-it-works) and [`SECURITY.md`](SECURITY.md) for the suppo
 SSH into the console as root, then:
 
 ```bash
-git clone https://github.com/CALTechNet/unifi-protect-multicam-onvif.git
-cd unifi-protect-multicam-onvif
+git clone https://github.com/CALTechNet/unifi-protect-multicamera-onvif.git
+cd unifi-protect-multicamera-onvif
 sudo ./apply.sh
 sudo systemctl restart unifi-protect
 ```
 
-`apply.sh` is idempotent and safe:
+`apply.sh` makes a backup and refuses to swap in a patch if the anchor checks or
+JavaScript syntax check fail. **It is not idempotent:** do not run it again on an
+already patched `service.js`. Start from a clean/unmodified Protect bundle before
+reapplying, or restore a known-good backup first.
+
+The script:
 
 1. backs up the current `service.js` to `service.js.bak-onvifmod-<timestamp>`,
 2. applies the patch to a copy,
@@ -96,11 +106,18 @@ download the repo as a zip. They must sit together in the same directory.
  
 ### Add by RTSP URL
 
-Use **Add stream URL as camera** for an RTSP-only camera or a lens that ONVIF doesn't
-list. The URL form is available immediately, without ONVIF probing. Paste the HQ RTSP
-URL and optionally an LQ URL from the same host. Include credentials in the HQ URL
-if necessary (`rtsp://user:password@192.168.1.50/stream1`). Protect uses the same
-credentials for both streams.
+**Add stream URL as camera** is available as soon as the helper loads, even when the
+camera does not support ONVIF. Enter a High-quality RTSP URL and optionally a
+Low-quality URL from the **same host**. If authentication is required, include it in
+the HQ URL, for example `rtsp://user:password@192.168.1.50/stream1`. Both streams
+use the same credentials; use URL encoding for special characters in passwords.
+
+If you previously probed the same host successfully via ONVIF, the helper retains
+its existing ONVIF-backed extra-lens adoption behavior. Otherwise, the RTSP-only
+path skips ONVIF completely and uses a synthetic device identity based on the HQ
+URL without embedded credentials. RTSP-only entries have no ONVIF PTZ or motion
+event support. After installation, test both live view and playback on your Protect
+console; those functions have not been verified on every firmware/camera combination.
 
 The page only talks to Protect's own authenticated API on the same origin; it stores
 nothing and sends nothing anywhere else.
@@ -190,13 +207,62 @@ with** so the session cookie applies.
   binding — leaving it on made the iOS app crash trying to drive it) and at a sane default
   frame rate / bitrate. Tick **This stream carries audio** in the picker if your RTSP URL
   includes an audio track, so Protect shows the audio controls; leave it off otherwise.
-- **Dashboard live view with two devices on one IP:** Protect's Dashboard grid binds a
-  live tile per camera IP, so when two Protect devices share one camera IP (a multi‑lens
-  rig, or a manual stream added next to the ONVIF lens) only the **first‑adopted** one
-  reliably shows live on the Dashboard; the second can show black even though **Playback →
-  Live works for both**. Workaround: **add the helper/manual lens first, then adopt the
-  native ONVIF lens.** This is Protect's own behavior, not something the patch controls.
+- **Dashboard live view with two devices sharing an IP:** a reporter observed a black
+  tile for the second camera although **Playback → Live** worked. Adding the manual
+  lens before the ONVIF lens helped in that setup, but this workaround may not apply
+  to every Protect version. See [#7](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/7).
 - Not affiliated with or endorsed by Ubiquiti.
+
+---
+
+## Known issues and troubleshooting
+
+The items below are **not all fixed**; please do not assume that a clean patch run
+means a reported runtime problem is resolved.
+
+| Issue | Current status |
+|---|---|
+| [#2: Thumbnails revert after adoption](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/2) | Per-profile snapshots are requested during adoption, but a reporter observed them reverting later. Persistence remains unverified. |
+| [#14: Enhanced stream compatibility resets selected profiles](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/14) | Open; stream compatibility mode may cause Protect to replace/refresh the camera record and override the selected streams. Root cause and fix are not verified. |
+| [#16: Protect 7.1.87 ignores stream selection](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/16) | Open; 7.1.87 is **not verified compatible**. A patch that applies without errors does not establish that stream selection works. |
+| [#7: Black Dashboard tile with multiple devices on one IP](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/7) | Reported workaround: add the manual lens before the ONVIF lens; behavior may vary across builds. |
+
+For selection/playback problems, please provide the **exact Protect version**, console
+model, camera/NVR model, whether the streams work directly in VLC, which stream
+profiles you selected (token/name/resolution), and what Protect actually played
+before/after the change. When safe to do so, compare the camera's settings with
+`tools/onvif_diag.py`. Redact IPs, credentials, tokens, device identifiers, and
+other sensitive data before posting logs or diagnostic output. Do not post RTSP
+URLs containing passwords.
+
+To **test a bundle offline without installing it**, see the `--input` / `--output`
+example in [How it works](#how-it-works). Do not run an unvalidated patch directly
+on a production console.
+
+---
+
+## How to explore the implementation
+
+This project changes Protect's minified backend using narrowly matched string
+anchors rather than replacing the entire application:
+
+1. Start with `onvif_helper.html` for the authenticated UI and requests to
+   `/third-party-cameras/probe` and `/third-party-cameras/adopt`.
+2. Read `patch_onvif.py` for the version-specific changes that expose the list
+   of ONVIF profiles, carry video-source tokens, select HQ/LQ streams, and assign
+   distinct device identities.
+3. Compare those changes with a locally extracted, unmodified Protect
+   `service.js` for the **same firmware version**. The patch refuses to replace
+   a string unless that anchor occurs exactly once, but this alone does not
+   guarantee the new behavior is correct.
+4. Use `tests/test_rtsp_only.py` and the CI workflow for reproducible offline
+   checks. Live adoption and playback tests require a compatible Protect console.
+
+Direct RTSP-only adoption works by validating the RTSP URLs, passing the stream
+metadata into Protect's camera-adoption path, and deriving a stable synthetic
+camera identity from the credential-free HQ URL. ONVIF is still used for ordinary
+ONVIF-backed cameras. This is an unofficial integration that depends on internal
+Protect code, so behavior can change with firmware updates.
 
 ---
 
@@ -208,12 +274,13 @@ release tags; the latest tested state always lives on `main`.
 | UniFi Protect version | Status |
 |---|---|
 | **7.1.83** | ✅ Supported — developed and tested against this build |
-| **7.3.74** | ONVIF multi-lens console-tested on Debian 13 ARM64. RTSP-only patching and Node syntax verified against the official Debian 13 ARM64 package; live RTSP-only adoption is untested. |
-| Other 7.1.x | ⚠️ Best effort — patches only if the anchors still match, **aborts safely** otherwise |
+| **7.3.74** | ONVIF multi-lens console-tested on Debian 13 ARM64; RTSP-only patching and Node syntax validated offline; live RTSP-only adoption/recording not yet verified. |
+| Other 7.1.x | Not validated. **7.1.87 has a report of incorrect stream selection** ([#16](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/16)); anchor and syntax checks alone do not confirm behavior. |
 | Other versions | Untested |
 
-The mod only adds routes behind Protect's existing **authenticated** third‑party‑camera API on
-its own origin; it stores no credentials and sends nothing to third parties. The anchored patch
+The mod adds routes behind Protect's existing **authenticated** third-party-camera API on
+its own origin. The helper page does not persist credentials; Protect receives and
+handles credentials as part of the camera onboarding flow. The anchored patch
 can't half‑apply — `patch_onvif.py` requires each anchor exactly once and `apply.sh` syntax‑checks
 the result and keeps a timestamped backup before swapping anything in.
 

@@ -9,15 +9,16 @@ of this repo (there are none; the latest tested state always lives on `main`).
 | UniFi Protect version | Status |
 |---|---|
 | **7.1.83** | ✅ **Supported** — developed and tested against this build |
-| **7.3.74** | Console-tested on Debian 13 ARM64. Offline-verified on Debian 11 ARM64. |
-| Other 7.1.x | ⚠️ **Best effort** — `apply.sh` patches only if the code anchors still match, and **aborts safely** (no file written) if they don't |
+| **7.3.74** | ONVIF multi-lens console-tested on Debian 13 ARM64; RTSP-only patch and Node syntax checked offline against the official Debian 13 ARM64 bundle. RTSP-only recording/playback is untested on hardware. |
+| Other 7.1.x | **Not verified**; a report on **7.1.87** indicates stream-selection errors even after successful adoption ([#16](https://github.com/CALTechNet/unifi-protect-multicamera-onvif/issues/16)). Anchor matching is not a compatibility guarantee. |
 | Other versions | Untested |
 
 Because the patch is anchored to exact strings in the minified bundle, it never produces a
 partially-modified file: `patch_onvif.py` asserts each of its anchors appears **exactly once**
 before replacing, and `apply.sh` **syntax-checks** the result with Protect's own Node and keeps a
-timestamped backup before swapping anything in. If a newer Protect build moves an anchor, the
-worst case is "it refuses to apply," not a broken NVR.
+timestamped backup before swapping anything in. If a newer Protect build moves an anchor, an unknown or changed bundle should fail before the swap if an anchor does not match.
+However, matched anchors and a clean JavaScript syntax check **do not guarantee runtime
+correctness**. Always test the exact firmware and keep a rollback copy.
 
 ## Security model
 
