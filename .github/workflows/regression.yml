@@ -1,0 +1,14 @@
+name: RTSP and ONVIF compatibility
+on: [push, pull_request]
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax and RTSP regression checks
+        run: |
+          python3 -m py_compile patch_onvif.py
+          python3 tests/test_rtsp_only.py
