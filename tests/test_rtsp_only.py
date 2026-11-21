@@ -48,7 +48,7 @@ for (const parse of [a,b]) {
   assert.equal(result.username,'guest');
   assert.equal(result.password,'p@ss');
   assert.equal(result.streams.length,2);
-  assert.equal(result.streams[0].uri,'rtsp://10.0.0.5/live/high');
+  assert.equal(result.streams[0].uri,'rtsp://10.0.0.5:554/live/high');
   assert.equal(result.name,'Lobby');
   assert.match(result.mac,/^[0-9A-F]{12}$/);
   assert.equal(parse(request).mac,result.mac,'Re-adoption keeps identity');
