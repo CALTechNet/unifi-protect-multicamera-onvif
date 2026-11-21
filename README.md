@@ -208,7 +208,7 @@ release tags; the latest tested state always lives on `main`.
 | UniFi Protect version | Status |
 |---|---|
 | **7.1.83** | ✅ Supported — developed and tested against this build |
-| **7.3.74** | ONVIF multi-lens support console-tested on Debian 13 ARM64. RTSP-only adoption requires fresh runtime verification. |
+| **7.3.74** | ONVIF multi-lens console-tested on Debian 13 ARM64. RTSP-only patching and Node syntax verified against the official Debian 13 ARM64 package; live RTSP-only adoption is untested. |
 | Other 7.1.x | ⚠️ Best effort — patches only if the anchors still match, **aborts safely** otherwise |
 | Other versions | Untested |
 
